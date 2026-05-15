@@ -1,35 +1,24 @@
-# n8n Autoscaling System (n8n 2.0 Ready)
+# n8n Autoscaling System
 
-A Docker-based autoscaling solution for n8n workflow automation platform. Dynamically scales worker containers based on Redis queue length. No need to deal with k8s or any other container scaling provider - a simple script runs it all and is easily configurable.
+A Docker-based autoscaling solution for n8n workflow automation platform. Dynamically scales worker containers based on Redis queue length. No need to deal with k8s or any other container scaling provider — a simple script runs it all and is easily configurable.
 
-**Now updated for n8n 2.0** with external task runners support.
+Tested with hundreds of simultaneous executions running on an 8-core 16 GB RAM VPS.
 
-Tested with hundreds of simultaneous executions running on an 8 core 16gb ram VPS.
+Simple install, just clone the files + docker compose up.
 
-Includes Puppeteer and Playwright with Chromium built-in for pro level scraping from the n8n code node. Stealth plugins included for bot detection evasion.
+## Task Runner Modes
 
-Simple install, just clone the files + docker compose up
+This build uses **internal mode** by default — task runners run as child processes inside each n8n container. This is faster than external mode (no HTTP/IPC overhead) and requires no separate runner containers.
 
-## What's New in n8n 2.0
-
-n8n 2.0 introduced breaking changes for task runners:
-- Task runners are now **separate containers** (external mode)
-- Each worker needs its own task runner sidecar
-- The main n8n instance exposes a task broker on port 5679
-- External packages must be configured in the task runner image
-
-This build handles all of this automatically - the autoscaler scales both workers and their task runners together.
+If you need browser automation (Puppeteer/Playwright) in Code nodes, switch to **external mode** using the files in this repo (`Dockerfile.runner`, `n8n-task-runners.json`). See [Adding External Packages](#adding-external-packages) for details.
 
 ## Architecture Overview
 
 ```mermaid
 graph TD
     A[n8n Main] -->|Queues jobs| B[Redis]
-    A -->|Task Broker :5679| TR1[Task Runner Main]
     B -->|Monitors queue| C[Autoscaler]
-    C -->|Scales together| D[n8n Workers]
-    C -->|Scales together| TR2[Task Runner Workers]
-    D -->|Code execution| TR2
+    C -->|Scales| D[n8n Workers]
     B -->|Monitors queue| E[Redis Monitor]
     F[PostgreSQL] -->|Stores data| A
     A -->|Webhooks| G[n8n Webhook]
@@ -40,28 +29,26 @@ graph TD
 
 | Service | Description |
 |---------|-------------|
-| `n8n` | Main n8n instance (editor, API) |
-| `n8n-task-runner` | Task runner for main instance |
+| `n8n` | Main n8n instance (editor, API, internal task runner) |
 | `n8n-webhook` | Dedicated webhook processor |
-| `n8n-worker` | Queue workers (autoscaled) |
-| `n8n-worker-runner` | Task runners for workers (autoscaled 1:1 with workers) |
+| `n8n-worker` | Queue workers (autoscaled, each runs its own internal task runner) |
 | `redis` | Job queue |
 | `postgres` | Database (with pgvector) |
-| `n8n-autoscaler` | Monitors queue and scales workers + runners |
+| `n8n-autoscaler` | Monitors queue and scales workers |
 | `redis-monitor` | Queue monitoring |
 | `cloudflared` | Cloudflare tunnel |
 
 ## Features
 
 - Dynamic scaling of n8n worker containers based on queue length
-- **n8n 2.0 compatible** - external task runners with proper sidecar scaling
+- **Internal task runners** — no separate runner containers needed
+- Shared binary data volume across all n8n containers (main, webhook, worker)
 - Configurable scaling thresholds and limits
 - Redis queue monitoring
 - Docker Compose based deployment
 - Health checks for all services
-- Puppeteer and Playwright with Chromium for web scraping in Code nodes
-- Stealth plugins for bot detection evasion
-- External npm packages (ajv, puppeteer-core, playwright-core, etc.)
+- Extra tools built into the n8n image (ffmpeg, git, jq, curl, graphicsmagick)
+- Optional external runner mode with Puppeteer/Playwright/Chromium for browser automation
 - Example workflows ready to import
 
 ## Prerequisites
@@ -84,7 +71,7 @@ graph TD
    ```
 
 3. Configure your environment variables in `.env`:
-   - Set strong passwords for `POSTGRES_PASSWORD`, `N8N_ENCRYPTION_KEY`, `N8N_RUNNERS_AUTH_TOKEN`
+   - Set strong passwords for `POSTGRES_PASSWORD`, `N8N_ENCRYPTION_KEY`, `N8N_USER_MANAGEMENT_JWT_SECRET`
    - Update domain settings (`N8N_HOST`, `N8N_WEBHOOK`, etc.)
    - Add your `CLOUDFLARE_TUNNEL_TOKEN`
    - Optionally set `TAILSCALE_IP` for private access
@@ -112,15 +99,13 @@ graph TD
 | `POLLING_INTERVAL_SECONDS` | How often to check queue length | 10 |
 | `COOLDOWN_PERIOD_SECONDS` | Time between scaling actions | 10 |
 
-### Task Runner Configuration (n8n 2.0)
+### Task Runner Configuration
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `N8N_RUNNERS_ENABLED` | Enable external task runners | true |
-| `N8N_RUNNERS_MODE` | Task runner mode | external |
-| `N8N_RUNNERS_AUTH_TOKEN` | Auth token for runners | (set your own) |
-| `N8N_RUNNERS_MAX_CONCURRENCY` | Max concurrent tasks per runner | 5 |
-| `NODE_FUNCTION_ALLOW_EXTERNAL` | Allowed npm packages in Code nodes | ajv,puppeteer-core,playwright-core,... |
+| `N8N_RUNNERS_ENABLED` | Enable task runners | true |
+| `N8N_RUNNERS_MODE` | `internal` (child process) or `external` (separate container) | internal |
+| `N8N_RUNNERS_MAX_CONCURRENCY` | Max concurrent tasks per runner | 10 |
 
 ### Timeout Configuration
 
@@ -129,6 +114,15 @@ Adjust these to be greater than your longest expected workflow execution time (i
 N8N_QUEUE_BULL_GRACEFULSHUTDOWNTIMEOUT=300
 N8N_GRACEFUL_SHUTDOWN_TIMEOUT=300
 ```
+
+### Binary Data Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `N8N_DEFAULT_BINARY_DATA_MODE` | Where binary files are stored (`filesystem` or `s3`) | filesystem |
+| `N8N_PAYLOAD_SIZE_MAX` | Max payload size in MB | 64 |
+
+> **Important:** In queue mode, all n8n containers (main, webhook, worker) must share the same binary data volume. Otherwise file uploads received by the webhook container won't be accessible to workers. This is handled in the default `docker-compose.yml` — all containers mount the `n8n_main` volume.
 
 ## Scaling Behavior
 
@@ -141,11 +135,18 @@ The autoscaler:
    - Queue length < `SCALE_DOWN_QUEUE_THRESHOLD`
    - Current replicas > `MIN_REPLICAS`
 4. Respects cooldown period between scaling actions
-5. **Scales workers and task runners together** (1:1 ratio)
 
 ## Adding External Packages
 
-The following packages are pre-installed and ready to use in Code nodes:
+### Internal mode (default)
+
+Internal mode runs the task runner as a child process inside n8n. External npm packages aren't supported in internal mode Code nodes unless you install them into the n8n image itself.
+
+### External mode (for browser automation)
+
+If you need Puppeteer, Playwright, or other npm packages in Code nodes, switch to external mode. The repo includes `Dockerfile.runner` and `n8n-task-runners.json` for this purpose.
+
+The following packages are pre-installed in the external runner image:
 
 | Package | Description |
 |---------|-------------|
@@ -156,11 +157,8 @@ The following packages are pre-installed and ready to use in Code nodes:
 | `playwright-extra` | Playwright with plugin support |
 | `ajv` | JSON schema validation |
 | `ajv-formats` | Additional AJV formats |
-| `moment` | Date/time manipulation |
 
-### Adding More Packages
-
-To add additional npm packages:
+To add more packages:
 
 1. Edit `Dockerfile.runner` and add packages to the pnpm install:
    ```dockerfile
@@ -176,9 +174,14 @@ To add additional npm packages:
    "NODE_FUNCTION_ALLOW_EXTERNAL": "moment,ajv,ajv-formats,puppeteer-core,playwright-core,your-package-here"
    ```
 
-3. Rebuild:
+3. Switch `.env` to external mode and add runner services to `docker-compose.yml`:
+   ```
+   N8N_RUNNERS_MODE=external
+   ```
+
+4. Rebuild:
    ```bash
-   docker compose build --no-cache n8n-task-runner n8n-worker-runner
+   docker compose build --no-cache
    docker compose up -d
    ```
 
@@ -194,14 +197,19 @@ View logs:
 # All services
 docker compose logs -f
 
-# Specific service
+# Autoscaler
 docker compose logs -f n8n-autoscaler
 
-# Task runners
-docker compose logs -f n8n-task-runner n8n-worker-runner
+# Workers
+docker compose logs -f n8n-worker
+
+# Webhooks
+docker compose logs -f n8n-webhook
 ```
 
 ## Updating
+
+See [docs/n8n-version-upgrades.md](docs/n8n-version-upgrades.md) for bumping the pinned n8n Docker image and rolling it out safely.
 
 To update:
 ```bash
@@ -232,16 +240,12 @@ docker compose exec redis redis-cli ping
 docker compose exec redis redis-cli LLEN bull:jobs:wait
 ```
 
-### Task runner issues
-If Code nodes fail, check task runner logs:
+### Binary data / file upload issues
+If file uploads via forms aren't reaching workers, verify all n8n containers share the same volume:
 ```bash
-docker compose logs n8n-task-runner
+docker inspect n8n-autoscaling-n8n-webhook-1 --format '{{range .Mounts}}{{.Name}} -> {{.Destination}}{{end}}'
 ```
-
-Verify the task broker is accessible:
-```bash
-docker compose exec n8n-task-runner wget -qO- http://n8n:5679/health || echo "Not reachable"
-```
+All containers (n8n, n8n-webhook, n8n-worker) should mount `n8n_main` to `/n8n`.
 
 ### Webhook URL format
 Webhooks use your Cloudflare subdomain:
@@ -254,12 +258,14 @@ https://webhook.yourdomain.com/webhook/your-webhook-id
 ```
 .
 ├── docker-compose.yml        # Main compose file
-├── Dockerfile                # Main n8n image (based on n8nio/n8n)
-├── Dockerfile.runner         # Task runner image (based on n8nio/runners)
-├── n8n-task-runners.json     # Task runner launcher config (security settings, allowed packages)
+├── Dockerfile                # Main n8n image (based on n8nio/n8n, adds ffmpeg/git/jq/curl/gm)
+├── Dockerfile.runner         # External task runner image (only needed for external mode)
+├── n8n-task-runners.json     # Task runner config for external mode (package allowlist, security)
 ├── .env.example              # Example environment configuration
 ├── .env                      # Your configuration (git-ignored)
 ├── examples/                 # Example n8n workflows (Puppeteer/Playwright)
+├── docs/
+│   └── n8n-version-upgrades.md  # Guide for bumping the pinned n8n version
 ├── autoscaler/
 │   ├── Dockerfile            # Autoscaler container
 │   └── autoscaler.py         # Scaling logic
@@ -267,23 +273,9 @@ https://webhook.yourdomain.com/webhook/your-webhook-id
     └── monitor.Dockerfile    # Redis monitor container
 ```
 
-## Task Runner Security Configuration
-
-The `n8n-task-runners.json` file controls security settings for the JavaScript task runner:
-
-| Setting | Description |
-|---------|-------------|
-| `NODE_ENV=test` | Disables prototype freezing (required for puppeteer/playwright) |
-| `NODE_FUNCTION_ALLOW_EXTERNAL` | Comma-separated list of allowed npm packages |
-| `NODE_FUNCTION_ALLOW_BUILTIN` | Allowed Node.js built-in modules |
-| `PUPPETEER_EXECUTABLE_PATH` | Path to chromium binary |
-| `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` | Path to chromium binary for Playwright |
-
-**Note:** The default config removes sandbox restrictions to allow puppeteer/playwright and libraries like AJV that use `new Function()`. If you don't need these, you can restore the original security settings from the n8nio/runners image.
-
 ## Example Workflows
 
-The `examples/` folder contains ready-to-import n8n workflows demonstrating browser automation:
+The `examples/` folder contains ready-to-import n8n workflows demonstrating browser automation (requires external runner mode):
 
 | File | Description |
 |------|-------------|
@@ -297,53 +289,10 @@ The `examples/` folder contains ready-to-import n8n workflows demonstrating brow
 
 Import via: **Workflows** > **Add Workflow** > **Import from File**
 
-### Quick Example (Puppeteer)
-
-```javascript
-const puppeteer = require('puppeteer-core');
-
-const browser = await puppeteer.launch({
-  executablePath: '/usr/bin/chromium-browser',
-  headless: true,
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-});
-
-const page = await browser.newPage();
-await page.goto('https://example.com');
-const title = await page.title();
-await browser.close();
-
-return [{ json: { title } }];
-```
-
-### Quick Example (Playwright with Stealth)
-
-```javascript
-const { chromium } = require('playwright-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
-chromium.use(StealthPlugin());
-
-const browser = await chromium.launch({
-  executablePath: '/usr/bin/chromium-browser',
-  headless: true,
-  args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-});
-
-const page = await browser.newPage();
-await page.goto('https://example.com');
-const title = await page.title();
-await browser.close();
-
-return [{ json: { title } }];
-```
-
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
 
 ## Credits
 
-For step by step instructions follow this guide: https://www.reddit.com/r/n8n/comments/1l9mi6k/major_update_to_n8nautoscaling_build_step_by_step/
-
-Now includes Cloudflared. Configure on cloudflare.com and paste your token in the .env file.
+For step-by-step instructions follow this guide: https://www.reddit.com/r/n8n/comments/1l9mi6k/major_update_to_n8nautoscaling_build_step_by_step/

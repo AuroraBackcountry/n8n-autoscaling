@@ -16,8 +16,8 @@ RUN apk add --no-cache \
     openssh-client \
     graphicsmagick
 
-# Stage 2: Copy to runners image
-FROM n8nio/runners:latest
+# Stage 2: Copy to runners image (keep in sync with n8n version in Dockerfile)
+FROM n8nio/runners:2.14.2
 
 USER root
 

@@ -20,7 +20,7 @@ QUEUE_NAME_PREFIX = os.getenv('QUEUE_NAME_PREFIX')
 QUEUE_NAME = os.getenv('QUEUE_NAME')
 
 N8N_WORKER_SERVICE_NAME = os.getenv('N8N_WORKER_SERVICE_NAME')
-N8N_WORKER_RUNNER_SERVICE_NAME = os.getenv('N8N_WORKER_RUNNER_SERVICE_NAME', 'n8n-worker-runner')  # n8n 2.0 task runner sidecar
+N8N_WORKER_RUNNER_SERVICE_NAME = os.getenv('N8N_WORKER_RUNNER_SERVICE_NAME', '')  # n8n 2.0 task runner sidecar (empty = internal mode, no sidecar)
 COMPOSE_PROJECT_NAME = os.getenv('COMPOSE_PROJECT_NAME') # e.g., "n8n-workers"
 COMPOSE_FILE_PATH = os.getenv('COMPOSE_FILE_PATH') # Path inside this container
 
@@ -146,14 +146,17 @@ def scale_service(service_name, replicas, compose_file, project_name):
 
 
 def scale_worker_with_runner(replicas, compose_file, project_name):
-    """Scales both the n8n worker and its task runner sidecar together (n8n 2.0 requirement)."""
-    logging.info(f"Scaling worker and task runner to {replicas} replicas each...")
+    """Scales the n8n worker (and task runner sidecar if configured for external mode)."""
+    if N8N_WORKER_RUNNER_SERVICE_NAME:
+        logging.info(f"Scaling worker and task runner to {replicas} replicas each...")
+    else:
+        logging.info(f"Scaling worker to {replicas} replicas (internal runner mode, no sidecar)...")
 
-    # Scale both services in a single command for atomicity
     if not project_name:
         logging.error("COMPOSE_PROJECT_NAME is not set. Cannot execute docker-compose scale.")
         return False
 
+    # Build command - only include runner service if configured (external mode)
     command = [
         "docker",
         "compose",
@@ -164,10 +167,16 @@ def scale_worker_with_runner(replicas, compose_file, project_name):
         "-d",
         "--no-deps",
         "--scale", f"{N8N_WORKER_SERVICE_NAME}={replicas}",
-        "--scale", f"{N8N_WORKER_RUNNER_SERVICE_NAME}={replicas}",
-        N8N_WORKER_SERVICE_NAME,
-        N8N_WORKER_RUNNER_SERVICE_NAME
     ]
+    services = [N8N_WORKER_SERVICE_NAME]
+
+    # Add runner sidecar if using external mode
+    if N8N_WORKER_RUNNER_SERVICE_NAME:
+        command.extend(["--scale", f"{N8N_WORKER_RUNNER_SERVICE_NAME}={replicas}"])
+        services.append(N8N_WORKER_RUNNER_SERVICE_NAME)
+
+    command.extend(services)
+
     logging.info(f"Executing scaling command: {' '.join(command)}")
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=SUBPROCESS_TIMEOUT_SECONDS)
@@ -176,10 +185,10 @@ def scale_worker_with_runner(replicas, compose_file, project_name):
              logging.warning(f"Scale command stderr: {result.stderr.strip()}")
         return True
     except subprocess.TimeoutExpired:
-        logging.error(f"Timeout ({SUBPROCESS_TIMEOUT_SECONDS}s) scaling worker+runner to {replicas}. Docker may be unresponsive.")
+        logging.error(f"Timeout ({SUBPROCESS_TIMEOUT_SECONDS}s) scaling to {replicas}. Docker may be unresponsive.")
         return False
     except subprocess.CalledProcessError as e:
-        logging.error(f"Error scaling worker+runner to {replicas}:")
+        logging.error(f"Error scaling to {replicas}:")
         logging.error(f"  Command: {' '.join(e.cmd)}")
         logging.error(f"  Return Code: {e.returncode}")
         logging.error(f"  Stdout: {e.stdout}")
