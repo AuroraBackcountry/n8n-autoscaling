@@ -17,7 +17,7 @@ RUN apk add --no-cache \
     graphicsmagick
 
 # Stage 2: Copy to runners image (keep in sync with n8n version in Dockerfile)
-FROM n8nio/runners:2.20.9
+FROM n8nio/runners:2.29.9
 
 USER root
 
