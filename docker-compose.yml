@@ -199,7 +199,7 @@ services:
       - n8n_main:/data/n8n_main:ro
       - redis_data:/data/redis:ro
       - backup_data:/backups
-#      - ./backup/rclone.conf:/config/rclone/rclone.conf:ro  # Uncomment after creating rclone.conf from rclone.conf.example
+      - ./backup/rclone.conf:/config/rclone/rclone.conf:ro # gitignored; create from rclone.conf.example
     environment:
       - POSTGRES_HOST=${POSTGRES_HOST}
       - POSTGRES_DB=${POSTGRES_DB}
