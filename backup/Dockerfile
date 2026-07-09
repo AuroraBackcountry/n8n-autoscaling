@@ -1,40 +1,22 @@
-# Stage 1: Builder - install rclone, pg_dump client, gpg
-FROM alpine:3.21 AS builder
+# Single-stage Alpine build: pg_dump 17 matches the pgvector/pg17 server,
+# and everything runs on musl. (Upstream's multi-stage build copied Alpine
+# binaries into a Debian image, which fails at exec time — missing musl loader.)
+FROM alpine:3.21
 
 RUN apk add --no-cache \
+    python3 \
+    py3-pip \
     rclone \
     postgresql17-client \
     gnupg \
     tar \
     gzip
 
-# Stage 2: Final image with Python runtime
-FROM python:3.9-slim
-
 WORKDIR /app
 
-# Install runtime dependencies (pg_dump needs libpq, rclone/gpg are standalone binaries)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    libpq5 \
-    gnupg \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Copy binaries from builder
-COPY --from=builder /usr/bin/rclone /usr/bin/rclone
-COPY --from=builder /usr/bin/pg_dump /usr/bin/pg_dump
-COPY --from=builder /usr/lib/libpq* /usr/lib/
-COPY --from=builder /usr/lib/libssl* /usr/lib/
-COPY --from=builder /usr/lib/libcrypto* /usr/lib/
-COPY --from=builder /usr/lib/libldap* /usr/lib/
-COPY --from=builder /usr/lib/liblber* /usr/lib/
-COPY --from=builder /usr/lib/libsasl* /usr/lib/
-
-# Install Python dependencies
+# Install Python dependencies (pure-Python: dotenv, croniter, redis)
 COPY backup/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Create backup working directory and empty default rclone config
 RUN mkdir -p /backups /config/rclone && \
@@ -43,4 +25,4 @@ RUN mkdir -p /backups /config/rclone && \
 # Copy application
 COPY backup/backup.py .
 
-CMD ["python", "-u", "backup.py"]
+CMD ["python3", "-u", "backup.py"]
