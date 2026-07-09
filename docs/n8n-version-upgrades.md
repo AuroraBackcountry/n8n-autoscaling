@@ -1,5 +1,7 @@
 # n8n version upgrades (custom Docker build)
 
+> **Automated:** the `biweekly-n8n-upgrade` scheduled Claude task (1st & 15th of the month, 9am) runs this procedure end-to-end — version check, breaking-change review, pre-upgrade backup, deploy, verify, rollback-on-failure. This doc remains the manual runbook and the task's reference; keep the two consistent if either changes.
+
 This repo extends the official n8n image with extra tools (ffmpeg, git, jq, curl, graphicsmagick, etc.). Upgrading n8n means **bumping the pinned base image tags** and **rebuilding** the three services that use `Dockerfile`.
 
 ## What to keep in sync

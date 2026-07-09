@@ -35,6 +35,7 @@ graph TD
 | `redis` | Job queue |
 | `postgres` | Database (with pgvector) |
 | `n8n-autoscaler` | Monitors queue and scales workers |
+| `n8n-backup` | Scheduled backups: pg_dump + Redis + volume archive, optional rclone upload (`backup` profile) |
 | `redis-monitor` | Queue monitoring |
 | `cloudflared` | Cloudflare tunnel |
 
@@ -44,6 +45,9 @@ graph TD
 - **Internal task runners** — no separate runner containers needed
 - Shared binary data volume across all n8n containers (main, webhook, worker)
 - Configurable scaling thresholds and limits
+- Scheduled encrypted-capable backups with multi-cloud rclone upload (R2/S3/B2)
+- Localhost-only port bindings by default; public traffic via Cloudflare Tunnel only
+- Log rotation on all services (json-file, 10 MB × 3)
 - Redis queue monitoring
 - Docker Compose based deployment
 - Health checks for all services
@@ -61,7 +65,7 @@ graph TD
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/conor-is-my-name/n8n-autoscaling.git
+   git clone https://github.com/AuroraBackcountry/n8n-autoscaling.git
    cd n8n-autoscaling
    ```
 
@@ -136,6 +140,10 @@ The autoscaler:
    - Current replicas > `MIN_REPLICAS`
 4. Respects cooldown period between scaling actions
 
+Each worker also runs with `--concurrency=20` (set on the `n8n-worker` command in docker-compose.yml), so up to 20 jobs per worker execute in parallel before container scaling is needed.
+
+> **Note:** the autoscaler image bakes `docker-compose.yml` in at build time. After changing anything about the `n8n-worker` service in the compose file, rebuild the autoscaler too: `docker compose build n8n-autoscaler`.
+
 ## Adding External Packages
 
 ### Internal mode (default)
@@ -204,7 +212,7 @@ Key settings (see `.env.example` for all of them):
 | `BACKUP_ENCRYPTION_KEY` | GPG passphrase (empty = unencrypted) | (empty) |
 | `BACKUP_RUN_ON_START` | Also back up when the container starts | false |
 
-For remote upload, copy `backup/rclone.conf.example` to `backup/rclone.conf` (git-ignored), configure a remote, and uncomment the rclone.conf mount in `docker-compose.yml`.
+For remote upload, copy `backup/rclone.conf.example` to `backup/rclone.conf` (git-ignored), configure a remote, and set `BACKUP_RCLONE_DESTINATIONS`. Create the file **before** enabling the `backup` profile — the compose service mounts it.
 
 > **Note:** local backups live on the same disk as the data they protect. Configure a rclone remote (or enable Hetzner/host-level snapshots) for real disaster recovery.
 
@@ -232,14 +240,14 @@ docker compose logs -f n8n-webhook
 
 ## Updating
 
-See [docs/n8n-version-upgrades.md](docs/n8n-version-upgrades.md) for bumping the pinned n8n Docker image and rolling it out safely.
+See [docs/n8n-version-upgrades.md](docs/n8n-version-upgrades.md) for bumping the pinned n8n Docker image and rolling it out safely. Short version — bump both `FROM` tags (Dockerfile + Dockerfile.runner) to the same version, then:
 
-To update:
 ```bash
-docker compose down
-docker compose build --no-cache
+docker compose build n8n n8n-webhook n8n-worker
 docker compose up -d
 ```
+
+No `docker compose down` needed, and `--no-cache` is only for debugging a bad build cache — changing the `FROM` tag already invalidates the relevant layers.
 
 ## Troubleshooting
 
@@ -284,14 +292,20 @@ https://webhook.yourdomain.com/webhook/your-webhook-id
 ├── Dockerfile                # Main n8n image (based on n8nio/n8n, adds ffmpeg/git/jq/curl/gm)
 ├── Dockerfile.runner         # External task runner image (only needed for external mode)
 ├── n8n-task-runners.json     # Task runner config for external mode (package allowlist, security)
+├── CLAUDE.md                 # Context file for AI-assisted maintenance
 ├── .env.example              # Example environment configuration
 ├── .env                      # Your configuration (git-ignored)
 ├── examples/                 # Example n8n workflows (Puppeteer/Playwright)
 ├── docs/
 │   └── n8n-version-upgrades.md  # Guide for bumping the pinned n8n version
 ├── autoscaler/
-│   ├── Dockerfile            # Autoscaler container
+│   ├── Dockerfile            # Autoscaler container (bakes docker-compose.yml in at build)
 │   └── autoscaler.py         # Scaling logic
+├── backup/
+│   ├── Dockerfile            # Backup container (Alpine, pg_dump 17 + rclone + gpg)
+│   ├── backup.py             # Backup logic (schedule, archive, upload, retention)
+│   ├── rclone.conf.example   # Template for remote storage config
+│   └── rclone.conf           # Your remote storage credentials (git-ignored)
 └── monitor/
     └── monitor.Dockerfile    # Redis monitor container
 ```
