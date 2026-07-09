@@ -168,7 +168,7 @@ services:
   n8n-worker:
     <<: *service-n8n
     stop_grace_period: 5m
-    command: worker
+    command: worker --concurrency=20
     volumes:
       - n8n_main:/n8n
     depends_on:

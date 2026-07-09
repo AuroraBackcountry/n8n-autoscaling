@@ -19,6 +19,7 @@ This repo's job is to always match what is actually deployed on the server. Trea
 - **This repo is public on GitHub.** Never commit secrets, server IPs, SSH details, or real `.env` values. Server-specific details live only in gitignored files: `.env`, `env.md`, `HETZNER_DEPLOYMENT_NOTES.md`.
 - A change to docker-compose.yml or the Dockerfiles is not real until rolled out on the server. When making such changes, say explicitly whether they've been deployed.
 - The compose file expects an external Docker network named `shark` (`docker network create shark` on a fresh host).
+- The autoscaler image **bakes `docker-compose.yml` in at build time** (`COPY docker-compose.yml .` in `autoscaler/Dockerfile`). Any compose change affecting `n8n-worker` must be followed by `docker compose build n8n-autoscaler` on the server, or autoscaled workers will be created from the stale baked-in definition.
 - Port bindings use `${TAILSCALE_IP:-127.0.0.1}` — empty `TAILSCALE_IP` means host-only. Never bind Postgres or n8n to 0.0.0.0; public traffic enters via the Cloudflare Tunnel only. DB access from a workstation goes through an SSH tunnel.
 - Timezone is `America/Vancouver` (`GENERIC_TIMEZONE`): cron triggers fire in Pacific time, DB timestamps stay UTC.
 - Community nodes: install via the UI on the main instance, then restart `n8n-webhook` and `n8n-worker` so existing containers rescan the shared nodes folder. Fresh autoscaled workers pick them up automatically.
