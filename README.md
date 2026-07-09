@@ -185,6 +185,29 @@ To add more packages:
    docker compose up -d
    ```
 
+## Backups
+
+An optional `n8n-backup` service (ported from upstream) runs scheduled backups: a `pg_dump` of Postgres, a gzipped Redis RDB snapshot, and a tar of the shared n8n volume, bundled into one archive in the `backup_data` volume. Optional GPG encryption and rclone upload to remote storage (R2/S3/B2/etc.).
+
+Enable it by adding to `.env`:
+```
+COMPOSE_PROFILES=backup
+```
+
+Key settings (see `.env.example` for all of them):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `BACKUP_SCHEDULE` | Cron schedule (UTC) | `0 2 * * *` |
+| `BACKUP_RETENTION_DAYS` | Days to keep old backups | 30 |
+| `BACKUP_RCLONE_DESTINATIONS` | Remote destinations, e.g. `r2:bucket/n8n` | (local only) |
+| `BACKUP_ENCRYPTION_KEY` | GPG passphrase (empty = unencrypted) | (empty) |
+| `BACKUP_RUN_ON_START` | Also back up when the container starts | false |
+
+For remote upload, copy `backup/rclone.conf.example` to `backup/rclone.conf` (git-ignored), configure a remote, and uncomment the rclone.conf mount in `docker-compose.yml`.
+
+> **Note:** local backups live on the same disk as the data they protect. Configure a rclone remote (or enable Hetzner/host-level snapshots) for real disaster recovery.
+
 ## Monitoring
 
 The system includes:

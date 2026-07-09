@@ -2,6 +2,7 @@ volumes:
   postgres_data:
   redis_data:
   n8n_main:
+  backup_data:
 
 networks:
   n8n-network:
@@ -9,12 +10,19 @@ networks:
   shark:
     external: true
 
+x-logging: &default-logging
+  driver: ${LOG_DRIVER:-json-file}
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: ${LOG_MAX_FILE:-3}
+
 x-n8n: &service-n8n
   build:
     context: .
     dockerfile: Dockerfile
   user: root:root
   restart: unless-stopped
+  logging: *default-logging
   networks:
     - n8n-network
     - shark
@@ -67,6 +75,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - n8n-network
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
@@ -76,6 +85,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
 #    ports:
 #      - 6379:6379
     healthcheck:
@@ -90,8 +100,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
+    logging: *default-logging
     ports:
-      - "${TAILSCALE_IP}:5432:5432" # Bind to Tailscale IP if set, otherwise all interfaces
+      - "${TAILSCALE_IP:-127.0.0.1}:5432:5432" # Tailscale IP if set, otherwise localhost only (never 0.0.0.0)
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
@@ -115,7 +126,7 @@ services:
   n8n:
     <<: *service-n8n
     ports:
-      - "${TAILSCALE_IP}:5678:5678"
+      - "${TAILSCALE_IP:-127.0.0.1}:5678:5678" # Tailscale IP if set, otherwise localhost only (never 0.0.0.0)
     volumes:
       - n8n_main:/n8n
     depends_on:
@@ -177,11 +188,53 @@ services:
       retries: 10
       start_period: 30s
 
+  n8n-backup:
+    profiles: [backup]
+    build:
+      context: .
+      dockerfile: backup/Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - n8n_main:/data/n8n_main:ro
+      - redis_data:/data/redis:ro
+      - backup_data:/backups
+#      - ./backup/rclone.conf:/config/rclone/rclone.conf:ro  # Uncomment after creating rclone.conf from rclone.conf.example
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-0 2 * * *}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY:-}
+      - BACKUP_RCLONE_DESTINATIONS=${BACKUP_RCLONE_DESTINATIONS:-}
+      - BACKUP_RUN_ON_START=${BACKUP_RUN_ON_START:-false}
+      - BACKUP_DELETE_LOCAL_AFTER_UPLOAD=${BACKUP_DELETE_LOCAL_AFTER_UPLOAD:-false}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_TO=${SMTP_TO:-}
+      - BACKUP_WEBHOOK_URL=${BACKUP_WEBHOOK_URL:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - n8n-network
+
   redis-monitor:
     build:
       context: .
       dockerfile: monitor/monitor.Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       redis:
         condition: service_healthy
@@ -208,6 +261,7 @@ services:
         - N8N_WORKER_SERVICE_NAME=${N8N_WORKER_SERVICE_NAME}
         - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}

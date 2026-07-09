@@ -5,3 +5,6 @@
 # Local-only deployment notes — contain plaintext secrets / server details
 env.md
 HETZNER_DEPLOYMENT_NOTES.md
+
+# Backup rclone config — contains cloud storage credentials
+backup/rclone.conf
