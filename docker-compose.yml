@@ -61,6 +61,8 @@ x-n8n: &service-n8n
     - N8N_RUNNERS_MODE=internal
     - N8N_RUNNERS_MAX_CONCURRENCY=${N8N_RUNNERS_MAX_CONCURRENCY:-10}
     - N8N_RUNNERS_MAX_OLD_SPACE_SIZE=${N8N_RUNNERS_MAX_OLD_SPACE_SIZE:-1024}
+    # Pinned: n8n will drop this default 300 -> 60 in a future release
+    - N8N_RUNNERS_TASK_TIMEOUT=${N8N_RUNNERS_TASK_TIMEOUT:-300}
     # Execution data settings (reduce DB bloat)
     - EXECUTIONS_DATA_SAVE_ON_ERROR=${EXECUTIONS_DATA_SAVE_ON_ERROR:-all}
     - EXECUTIONS_DATA_SAVE_ON_SUCCESS=${EXECUTIONS_DATA_SAVE_ON_SUCCESS:-none}
@@ -70,6 +72,11 @@ x-n8n: &service-n8n
     # Binary data and payload
     - N8N_DEFAULT_BINARY_DATA_MODE=${N8N_DEFAULT_BINARY_DATA_MODE:-filesystem}
     - N8N_PAYLOAD_SIZE_MAX=${N8N_PAYLOAD_SIZE_MAX:-64}
+    # Pinned: n8n will flip/reduce these defaults in a future release.
+    # Community nodes are installed via the UI, so unverified packages stay enabled.
+    - N8N_UNVERIFIED_PACKAGES_ENABLED=${N8N_UNVERIFIED_PACKAGES_ENABLED:-true}
+    - N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES=${N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES:-2147483648}
+    - N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES=${N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES:-5000}
 
 services:
   cloudflared:
