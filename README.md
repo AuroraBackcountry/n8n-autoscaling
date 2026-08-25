@@ -292,7 +292,7 @@ https://webhook.yourdomain.com/webhook/your-webhook-id
 ├── Dockerfile                # Main n8n image (based on n8nio/n8n, adds ffmpeg/git/jq/curl/gm)
 ├── Dockerfile.runner         # External task runner image (only needed for external mode)
 ├── n8n-task-runners.json     # Task runner config for external mode (package allowlist, security)
-├── CLAUDE.md                 # Context file for AI-assisted maintenance
+├── AGENTS.md                 # Context file for AI-assisted maintenance (CLAUDE.md imports it)
 ├── .env.example              # Example environment configuration
 ├── .env                      # Your configuration (git-ignored)
 ├── examples/                 # Example n8n workflows (Puppeteer/Playwright)
