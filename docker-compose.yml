@@ -3,6 +3,7 @@ volumes:
   redis_data:
   n8n_main:
   backup_data:
+  sandbox_tls:
 
 networks:
   n8n-network:
@@ -77,6 +78,15 @@ x-n8n: &service-n8n
     - N8N_UNVERIFIED_PACKAGES_ENABLED=${N8N_UNVERIFIED_PACKAGES_ENABLED:-true}
     - N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES=${N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES:-2147483648}
     - N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES=${N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES:-5000}
+    # AI Assistant (instance-ai). The module is on by default in 2.35+, but a
+    # sandbox is required before the Assistant will run anything.
+    - N8N_INSTANCE_AI_SANDBOX_ENABLED=${N8N_INSTANCE_AI_SANDBOX_ENABLED:-true}
+    - N8N_INSTANCE_AI_SANDBOX_PROVIDER=n8n-sandbox
+    - N8N_INSTANCE_AI_SANDBOX_API_URL=http://sandbox-api:8080
+    # Must match a value in SANDBOX_API_KEYS on sandbox-api
+    - N8N_INSTANCE_AI_SANDBOX_API_KEY=${SANDBOX_API_KEYS}
+    - N8N_INSTANCE_AI_MODEL=${N8N_INSTANCE_AI_MODEL:-anthropic/claude-opus-4-8}
+    - N8N_INSTANCE_AI_MODEL_API_KEY=${N8N_INSTANCE_AI_MODEL_API_KEY:-}
 
 services:
   cloudflared:
@@ -194,6 +204,90 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+
+  # --- AI Assistant sandbox ---------------------------------------------------
+  # Executes code the Assistant writes. sandbox-runner-1 is a PRIVILEGED
+  # Docker-in-Docker container -- the highest-privilege thing in this stack, on
+  # the host that holds Postgres, every credential, and the encryption key.
+  # Contained deliberately: n8n-network only, no host port bindings, and never
+  # on the `shark` network. n8n does NOT depend_on these services, so a sandbox
+  # failure disables the Assistant without touching workflow execution.
+  # Upstream calls this setup dev/test-grade; Daytona is their production path.
+  sandbox-certs:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-api:latest
+    user: '0:0'
+    restart: "no" # one-shot: mints the mTLS material, then exits
+    logging: *default-logging
+    entrypoint: ['sh', '-c']
+    command:
+      - >
+        bootstrap-mtls.sh --out-dir /tls --api-san sandbox-api
+        --control-san-prefix sandbox-runner &&
+        chown -R sandbox-api:sandbox-api /tls/api
+    environment:
+      - NUM_RUNNERS=1
+    volumes:
+      - sandbox_tls:/tls
+    networks:
+      - n8n-network
+
+  sandbox-api:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-api:latest
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      sandbox-certs:
+        condition: service_completed_successfully
+    environment:
+      - SANDBOX_API_KEYS=${SANDBOX_API_KEYS}
+      - SANDBOX_API_RUNNER_REGISTRATION_TOKEN=${SANDBOX_API_RUNNER_REGISTRATION_TOKEN}
+      - SANDBOX_API_RUNNER_API_KEY=${SANDBOX_API_RUNNER_API_KEY}
+      - SANDBOX_API_GRPC_TLS_CERT_FILE=/tls/api/grpc-server.crt
+      - SANDBOX_API_GRPC_TLS_KEY_FILE=/tls/api/grpc-server.key
+      - SANDBOX_API_GRPC_TLS_CLIENT_CA_FILE=/tls/api/ca.crt
+      - SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CA_FILE=/tls/api/ca.crt
+      - SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_CERT_FILE=/tls/api/control-grpc-api-client.crt
+      - SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_KEY_FILE=/tls/api/control-grpc-api-client.key
+      - SANDBOX_API_RUNNER_CONTROL_GRPC_TLS_SERVER_NAME=sandbox-runner-1
+    volumes:
+      - sandbox_tls:/tls:ro
+    networks:
+      - n8n-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  sandbox-runner-1:
+    image: ghcr.io/n8n-io/n8n-sandbox-service-runner-dind:latest
+    privileged: true # required for Docker-in-Docker; see the note above
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      sandbox-api:
+        condition: service_healthy
+    environment:
+      - SANDBOX_RUNNER_API_KEYS=${SANDBOX_API_RUNNER_API_KEY}
+      - SANDBOX_RUNNER_REGISTRATION_TOKEN=${SANDBOX_API_RUNNER_REGISTRATION_TOKEN}
+      - SANDBOX_RUNNER_API_GRPC_ADDR=sandbox-api:9090
+      - SANDBOX_RUNNER_HTTP_BASE_URL=http://sandbox-runner-1:8080
+      - SANDBOX_RUNNER_CONTROL_GRPC_LISTEN_ADDR=:9091
+      - SANDBOX_RUNNER_CONTROL_GRPC_ADVERTISE_ADDR=sandbox-runner-1:9091
+      - SANDBOX_RUNNER_ID=runner-1
+      - SANDBOX_RUNNER_DOCKER_SANDBOX_IMAGE=ghcr.io/n8n-io/n8n-sandbox-service-sandbox:latest
+      - SANDBOX_RUNNER_REGISTRATION_GRPC_CA_FILE=/tls/runner/ca.crt
+      - SANDBOX_RUNNER_REGISTRATION_GRPC_CERT_FILE=/tls/runner/grpc-client.crt
+      - SANDBOX_RUNNER_REGISTRATION_GRPC_KEY_FILE=/tls/runner/grpc-client.key
+      - SANDBOX_RUNNER_REGISTRATION_GRPC_SERVER_NAME=sandbox-api
+      - SANDBOX_RUNNER_CONTROL_GRPC_TLS_CERT_FILE=/tls/runner/control-grpc-server.crt
+      - SANDBOX_RUNNER_CONTROL_GRPC_TLS_KEY_FILE=/tls/runner/control-grpc-server.key
+      - SANDBOX_RUNNER_CONTROL_GRPC_TLS_CLIENT_CA_FILE=/tls/runner/ca.crt
+    volumes:
+      - sandbox_tls:/tls:ro
+    networks:
+      - n8n-network
 
   n8n-backup:
     profiles: [backup]
