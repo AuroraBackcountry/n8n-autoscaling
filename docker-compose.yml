@@ -85,8 +85,10 @@ x-n8n: &service-n8n
     - N8N_INSTANCE_AI_SANDBOX_API_URL=http://sandbox-api:8080
     # Must match a value in SANDBOX_API_KEYS on sandbox-api
     - N8N_INSTANCE_AI_SANDBOX_API_KEY=${SANDBOX_API_KEYS}
-    - N8N_INSTANCE_AI_MODEL=${N8N_INSTANCE_AI_MODEL:-anthropic/claude-opus-4-8}
-    - N8N_INSTANCE_AI_MODEL_API_KEY=${N8N_INSTANCE_AI_MODEL_API_KEY:-}
+    # Model + API key are deliberately NOT set here. Any field n8n sees in the
+    # environment becomes read-only in the UI ("Cannot update environment-managed
+    # fields"), and the model belongs to whoever is using the Assistant. Set both
+    # in Settings -> AI; they persist in the DB and are covered by the nightly dump.
 
 services:
   cloudflared:
