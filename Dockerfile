@@ -13,7 +13,7 @@ RUN apk add --no-cache \
     curl
 
 # Stage 2: Copy to n8n image (pin version; bump tag when upgrading)
-FROM n8nio/n8n:2.39.5
+FROM n8nio/n8n:2.42.6
 
 USER root
 
