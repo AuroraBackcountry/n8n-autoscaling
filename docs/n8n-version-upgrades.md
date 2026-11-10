@@ -16,6 +16,8 @@ This repo extends the official n8n image with extra tools (ffmpeg, git, jq, curl
 
 ## Choose a target version
 
+**Never cross a major version in a routine upgrade.** If Docker Hub `stable` is on a different major than the pin (pin `2.x`, stable `3.x`), target the newest stable release of the pinned major instead: the highest `n8n@2.Y.Z` GitHub release that is not marked pre-release. A major upgrade migrates the database one-way and the rollback below only reverts the image, so plan it by hand.
+
 1. Check [n8n releases](https://github.com/n8n-io/n8n/releases) for notes, breaking changes, and migrations.
 2. Confirm the tag exists on Docker Hub: [n8nio/n8n tags](https://hub.docker.com/r/n8nio/n8n/tags), [n8nio/runners tags](https://hub.docker.com/r/n8nio/runners/tags).
 3. Optional: on the server (or any host with Docker), verify the image runs:
@@ -89,7 +91,7 @@ docker logs n8n-autoscaling-n8n-1 --tail 100
 
 ## Quick checklist for the next upgrade
 
-- [ ] Pick version from releases + confirm Docker tags exist.
+- [ ] Pick version from releases (same major as the current pin) + confirm Docker tags exist.
 - [ ] Bump `Dockerfile` and `Dockerfile.runner` to the same tag.
 - [ ] Update `env.md` pinned version + changelog.
 - [ ] Deploy files to server; `docker compose build n8n n8n-webhook n8n-worker`; `up -d`.

@@ -21,6 +21,7 @@ This repo's job is to always match what is actually deployed on the server. Trea
 - **This repo is public on GitHub.** Never commit secrets, server IPs, SSH details, or real `.env` values. Server-specific details live only in gitignored files: `.env`, `env.md`, `HETZNER_DEPLOYMENT_NOTES.md`, `backup/rclone.conf` (R2 credentials).
 - A change to docker-compose.yml or the Dockerfiles is not real until rolled out on the server. When making such changes, say explicitly whether they've been deployed.
 - The autoscaler image **bakes `docker-compose.yml` in at build time** (`COPY docker-compose.yml .` in `autoscaler/Dockerfile`). Any compose change affecting `n8n-worker` must be followed by `docker compose build n8n-autoscaler` on the server, or autoscaled workers will be created from the stale baked-in definition.
+- **Do not rescale or delete the Hetzner server.** Hetzner's 2026-06-15 US repricing applies to new and rescaled servers; this one keeps its old price only while left as-is, so a smaller plan would cost more, not less. Check the invoice before any plan change.
 - The compose file expects an external Docker network named `shark` (`docker network create shark` on a fresh host).
 - Port bindings use `${TAILSCALE_IP:-127.0.0.1}` — empty `TAILSCALE_IP` means host-only. Never bind Postgres or n8n to 0.0.0.0; public traffic enters via the Cloudflare Tunnel only. DB access from a workstation goes through an SSH tunnel.
 - The n8n base image has no package manager (`apk` is stripped) — extra tools are COPY'd in from an Alpine builder stage. Single binaries only; a full runtime tree (e.g. python3) is deliberately not added (n8n's internal-mode Python runner is debug-only per upstream; the startup warning about it is known and harmless).
@@ -33,7 +34,7 @@ This repo's job is to always match what is actually deployed on the server. Trea
 
 ## Development workflow
 
-- **Upgrading n8n is automated**: the `biweekly-n8n-upgrade` scheduled Claude task (1st & 15th, 9am) checks Docker Hub's `stable` tag, gates on breaking changes, bumps, takes a pre-upgrade backup, deploys, verifies, and rolls back on failure. `docs/n8n-version-upgrades.md` is the manual runbook it follows — keep the two consistent if either changes.
+- **Upgrading n8n is automated**: the `biweekly-n8n-upgrade` scheduled Claude task (1st & 15th, 9am) checks Docker Hub's `stable` tag (never crossing a major version — a new major is a manual upgrade), gates on breaking changes, bumps, takes a pre-upgrade backup, deploys, verifies, and rolls back on failure. `docs/n8n-version-upgrades.md` is the manual runbook it follows — keep the two consistent if either changes.
 - Server access commands and rollout details with real values: `HETZNER_DEPLOYMENT_NOTES.md` (gitignored, local machine only).
 - Mid-day restarts of the stack are currently acceptable.
 
