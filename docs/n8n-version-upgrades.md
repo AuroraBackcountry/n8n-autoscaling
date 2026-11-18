@@ -67,9 +67,9 @@ ssh root@<SERVER_IP> 'docker exec n8n-autoscaling-n8n-1 n8n --version'
 
 Smoke checks:
 
-- Editor loads: `https://n8n.guideops.app` (or your `N8N_HOST`).
-- Health: `https://n8n.guideops.app/healthz` → JSON with `"ok"`.
-- Webhook path still works if you use a separate host (e.g. `webhook.guideops.app`).
+- Editor loads: `https://n8n-aurora-ai.com` (or your `N8N_HOST`).
+- Health: `https://n8n-aurora-ai.com/healthz` → JSON with `"ok"`.
+- Webhook path still works on the separate webhook host: `https://forms.aurorabackcountry.com/healthz` → JSON with `"ok"`.
 - Run one short workflow and one Code node if you rely on internal task runners.
 
 n8n applies database migrations on startup when needed; watch main container logs if something fails on first boot:
